@@ -1,0 +1,86 @@
+Data Loading and Cleaning
+
+
+The model starts by loading weather data from a CSV file
+It first looks for any columns that have too many missing values (more than 5%) and removes them
+For any remaining missing values, it fills them using the last known value
+It then looks for any extreme values (outliers) and caps them at reasonable limits
+All dates are converted to a proper datetime format
+
+
+Feature Creation
+
+
+The model creates several types of features to help predict wind speed:
+
+Rolling averages: It looks at the average values over 3-day and 14-day periods
+Monthly patterns: It calculates typical values for each month
+Daily patterns: It figures out typical values for each day of the year
+Percentage changes: It tracks how much values change relative to their averages
+
+
+These features are created for temperature (max and min) and precipitation
+
+
+Target Setup
+
+
+The model sets up what it's trying to predict: wind speeds for the next 7 days
+For each day (1 through 7), it creates a separate target column
+These targets are just the actual wind speeds shifted forward in time
+
+
+Training and Testing Approach (Backtesting)
+
+
+The model uses a "rolling window" approach:
+
+It starts with about 10 years of data (3,650 days)
+It trains on this data and then predicts the next 90 days
+Then it moves forward 90 days and repeats
+This continues until it reaches the end of the data
+
+
+For each prediction window:
+
+It trains seven separate models (one for each day ahead)
+Each model uses the same features but predicts a different day's wind speed
+
+
+
+
+Model Type
+
+
+The model uses Ridge Regression, which:
+
+Makes predictions based on linear relationships
+Includes a penalty for complex relationships (to prevent overfitting)
+Is relatively simple and fast to train
+Works well with many related features
+
+
+
+
+Evaluation
+
+
+The model measures its performance using three different metrics:
+
+MAE: Average size of prediction errors
+MSE: Average of squared errors (penalizes big mistakes more)
+RMSE: Square root of MSE (puts the error back in original units)
+
+
+It calculates these metrics separately for each day's predictions
+All wind speeds can be converted between miles per hour and meters per second
+
+
+Future Predictions
+
+
+For actual use, the model:
+
+Takes the most recent data point
+Makes predictions for the next 7 days
+Returns these predictions in a clear format with dates
