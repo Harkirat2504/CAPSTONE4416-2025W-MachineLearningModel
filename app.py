@@ -20,7 +20,7 @@ API_KEY = "b783407e6178f465fa400808887c3e7f"
 # Set the region for forecasting
 REGION = "London Ontario"
 
-def load_energy_data(file_path="PUB_DemandZonal_2024_v374.csv"):
+def load_energy_data(file_path="Ontario_Demand_2024"):
     """
     Load and preprocess energy demand data.
     Expects a CSV with a 'Date' column and columns named 'Ontario Demand' and the region (e.g., 'London Ontario').
