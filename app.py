@@ -15,12 +15,12 @@ CORS(app, origins=["https://capstone2025w.netlify.app"])
 
 logging.basicConfig(level=logging.DEBUG)
 
-# API Key (not used in simulation but kept for compatibility)
+# API Key (kept for compatibility)
 API_KEY = "b783407e6178f465fa400808887c3e7f"
 # Set the region for forecasting
 REGION = "London Ontario"
 
-def load_energy_data(file_path="Ontario_Demand_2024"):
+def load_energy_data(file_path="PUB_DemandZonal_2024_v374.csv"):
     """
     Load and preprocess energy demand data.
     Expects a CSV with a 'Date' column and columns named 'Ontario Demand' and the region (e.g., 'London Ontario').
@@ -73,7 +73,7 @@ def predict_energy_demand():
     and aggregates hourly predictions to daily averages.
     """
     try:
-        # Get current date
+        # Use today's date
         today = datetime.now()
         month = today.month
         start_day = today.day
@@ -86,7 +86,7 @@ def predict_energy_demand():
 
         logging.info(f"Running prediction from {month}/{start_day} for 7 days in {REGION}")
 
-        # Load energy data
+        # Load historical energy data
         energy_df = load_energy_data()
         if energy_df is None:
             return {"error": "Energy data file not found or could not be processed"}
@@ -101,9 +101,9 @@ def predict_energy_demand():
         X_train['Temperature'] = X_train['Month'].map(temp_map) + np.random.normal(0, 2, size=len(X_train))
         X_train['Daylight'] = X_train['Hour'].apply(lambda h: 1 if 7 <= h <= 19 else 0)
 
-        # Ensure required target columns exist
+        # Ensure required columns exist
         if "Ontario Demand" not in energy_df.columns or REGION not in energy_df.columns:
-            logging.error("Required columns for demand not found in energy data.")
+            logging.error("Required energy demand columns not found in energy data.")
             return {"error": "Required energy demand columns not found"}
 
         y_train_ontario = energy_df['Ontario Demand']
@@ -116,7 +116,7 @@ def predict_energy_demand():
         model_region = RandomForestRegressor(n_estimators=100, random_state=42)
         model_region.fit(X_train, y_train_region)
 
-        # Prepare prediction features from simulated weather data
+        # Prepare features for prediction from simulated weather data
         X_pred = weather_df[['Month', 'Day', 'Hour', 'Temperature', 'Daylight']]
         y_pred_ontario = model_ontario.predict(X_pred)
         y_pred_region = model_region.predict(X_pred)
@@ -129,7 +129,7 @@ def predict_energy_demand():
         # Aggregate hourly predictions to daily averages
         agg_df = pred_df.groupby('Day').mean().reset_index()
 
-        # Build JSON response with keys "ontario_demand" and "london_demand"
+        # Create JSON response with keys "ontario_demand" and "london_demand"
         ontario_demand = {}
         london_demand = {}
         for i, row in enumerate(agg_df.itertuples(), 1):
