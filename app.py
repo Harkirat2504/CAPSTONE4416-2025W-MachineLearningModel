@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from datetime import datetime
-import os
 import logging
 from waitress import serve  # For production server
 
@@ -17,13 +16,13 @@ logging.basicConfig(level=logging.DEBUG)
 
 # API Key (kept for compatibility)
 API_KEY = "b783407e6178f465fa400808887c3e7f"
-# Set the region for forecasting
-REGION = "London Ontario"
+# Set the region for forecasting (changed to Toronto)
+REGION = "Toronto"
 
 def load_energy_data(file_path="PUB_DemandZonal_2024_v374.csv"):
     """
     Load and preprocess energy demand data.
-    Expects a CSV with a 'Date' column and columns named 'Ontario Demand' and the region (e.g., 'London Ontario').
+    Expects a CSV with a 'Date' column and columns named 'Ontario Demand' and the region (e.g., 'Toronto').
     """
     try:
         df = pd.read_csv(file_path, skiprows=3)
@@ -124,28 +123,27 @@ def predict_energy_demand():
         # Build a DataFrame with hourly predictions and group by day
         pred_df = weather_df[['Day']].copy()
         pred_df['Ontario_Demand'] = y_pred_ontario
-        pred_df['London_Demand'] = y_pred_region
+        pred_df['Toronto_Demand'] = y_pred_region
 
         # Aggregate hourly predictions to daily averages
         agg_df = pred_df.groupby('Day').mean().reset_index()
 
-        # Create JSON response with keys "ontario_demand" and "london_demand"
+        # Create JSON response with keys "ontario_demand" and "toronto_demand"
         ontario_demand = {}
-        london_demand = {}
+        toronto_demand = {}
         for i, row in enumerate(agg_df.itertuples(), 1):
             ontario_demand[f"day_{i}"] = round(row.Ontario_Demand, 2)
-            london_demand[f"day_{i}"] = round(row.London_Demand, 2)
+            toronto_demand[f"day_{i}"] = round(row.Toronto_Demand, 2)
 
         return {
             "ontario_demand": ontario_demand,
-            "london_demand": london_demand
+            "toronto_demand": toronto_demand
         }
 
     except Exception as e:
         logging.error(f"Prediction error: {e}")
         return {"error": str(e)}
 
-# API Endpoint to return energy demand forecasts
 @app.route('/predict', methods=['GET'])
 def predict():
     result = predict_energy_demand()
@@ -153,5 +151,4 @@ def predict():
 
 if __name__ == '__main__':
     logging.info("Starting Flask API Server...")
-    # Use waitress to serve the app in production
     serve(app, host="0.0.0.0", port=5000)
