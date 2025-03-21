@@ -29,7 +29,7 @@ def get_weather_data(month, start_day, api_key, mode, lat=43.7, lon=-79.42):
     current_temp = 20.0
     sunrise = 6
     sunset = 20
-    temp_adjust = {1: -10, 2: -8, 3: -4, 4: 2, 5: 8, 6: 14, 7: 18, 8: 16, 9: 10, 10: 4, 11: -2, 12: -8}
+    temp_adjust = {1: -10, 2: -8, 3: -4, 4: 2, 5: 8, 6: 14, 7: 20, 8: 16, 9: 10, 10: 4, 11: -2, 12: -8}
     avg_temp = current_temp + temp_adjust.get(month, 0)
     days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
     hourly_data = []
@@ -67,6 +67,7 @@ def predict():
         if model_multi is None:
             return jsonify({"error": "Model not available"})
 
+        # Generate the weather data
         weather_df = get_weather_data(month, start_day, API_KEY, mode='daily')
         X_pred = weather_df[['Month', 'Day', 'Hour', 'Temperature', 'Daylight']]
         predictions = model_multi.predict(X_pred)  # shape (num_samples, num_targets)
@@ -77,22 +78,35 @@ def predict():
             pred_df[col] = predictions[:, i]
         agg_df = pred_df.groupby('Day').mean().reset_index()
         
-        # Rename columns to remove spaces (so that getattr works)
+        # Rename columns to remove spaces
         agg_df.rename(columns=lambda c: c.replace(" ", "_"), inplace=True)
 
         # Build a dictionary of forecasts per day (each day is a dict with all targets)
         results = {}
         for i, row in enumerate(agg_df.itertuples(), 1):
-            day_forecast = {col: round(getattr(row, col.replace(" ", "_")), 2) for col in TARGET_COLUMNS}
+            # row attributes: Day, Ontario_Demand, Toronto, Niagara
+            # We'll revert underscores -> spaces in final keys
+            day_forecast = {}
+            for col in TARGET_COLUMNS:
+                safe_col = col.replace(" ", "_")
+                day_forecast[col] = round(getattr(row, safe_col), 2)
             results[f"day_{i}"] = day_forecast
 
-        # If a specific location is requested, filter the results
+        # Check if user requested a specific location
         location = request.args.get("location", None)
         if location is not None:
-            # Ensure location is valid (matches one of the TARGET_COLUMNS)
+            location = location.strip()
             if location not in TARGET_COLUMNS:
-                return jsonify({"error": f"Location {location} not available. Choose from {TARGET_COLUMNS}."})
-            filtered = {day: forecasts.get(location) for day, forecasts in results.items()}
+                return jsonify({
+                    "error": f"Location '{location}' not available. Choose from {TARGET_COLUMNS}."
+                })
+            # Return only Ontario Demand + the requested location for each day
+            filtered = {}
+            for day, forecasts in results.items():
+                filtered[day] = {
+                    "Ontario Demand": forecasts["Ontario Demand"],
+                    location: forecasts[location]
+                }
             return jsonify(filtered)
         
         # Otherwise, return all forecasts
