@@ -1,11 +1,11 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from datetime import datetime
 import logging
-import joblib  # For loading the models
+import joblib  # For loading the pre-trained models
 from waitress import serve  # For production server
 
 # Initialize Flask App
@@ -46,6 +46,7 @@ def get_weather_data(month, start_day, api_key, mode, lat=43.7, lon=-79.42):
     days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
     hourly_data = []
     
+    # Generate hourly data for 7 days
     for day_offset in range(7):
         day = start_day + day_offset
         if day > days_in_month:
@@ -63,9 +64,10 @@ def get_weather_data(month, start_day, api_key, mode, lat=43.7, lon=-79.42):
 
 def predict_energy_demand():
     try:
+        # Retrieve query parameters (defaults to today's date if not provided)
         today = datetime.now()
-        month = today.month
-        start_day = today.day
+        month = int(request.args.get("month", today.month))
+        start_day = int(request.args.get("start_day", today.day))
         days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
         max_start_day = days_in_month - 6
         if start_day > max_start_day:
