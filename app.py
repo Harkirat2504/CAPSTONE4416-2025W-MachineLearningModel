@@ -7,17 +7,15 @@ import logging
 import joblib  # For loading the pre-trained model
 from waitress import serve  # For production server
 
-# Initialize Flask App
 app = Flask(__name__)
 CORS(app, origins=["https://capstone2025w.netlify.app"])
 
 logging.basicConfig(level=logging.DEBUG)
 
 API_KEY = "b783407e6178f465fa400808887c3e7f"
-# List of target columns in the multi-output model (order must match training)
 TARGET_COLUMNS = ["Ontario Demand", "Toronto", "Niagara"]
 
-# Load pre-trained multi-output model at startup
+# Load pre-trained multi-output model
 try:
     model_multi = joblib.load("multioutput_model.pkl")
     logging.info("Multi-output model loaded successfully.")
@@ -34,7 +32,6 @@ def get_weather_data(month, start_day, api_key, mode, lat=43.7, lon=-79.42):
     days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
     hourly_data = []
     
-    # Generate hourly weather data for 7 days
     for day_offset in range(7):
         day = start_day + day_offset
         if day > days_in_month:
@@ -54,7 +51,6 @@ def get_weather_data(month, start_day, api_key, mode, lat=43.7, lon=-79.42):
 def predict():
     try:
         today = datetime.now()
-        # Retrieve query parameters (defaults to today's date if not provided)
         month = int(request.args.get("month", today.month))
         start_day = int(request.args.get("start_day", today.day))
         days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
@@ -67,40 +63,31 @@ def predict():
         if model_multi is None:
             return jsonify({"error": "Model not available"})
 
-        # Generate the weather data
         weather_df = get_weather_data(month, start_day, API_KEY, mode='daily')
         X_pred = weather_df[['Month', 'Day', 'Hour', 'Temperature', 'Daylight']]
-        predictions = model_multi.predict(X_pred)  # shape (num_samples, num_targets)
-        
-        # Build a DataFrame with predictions
+        predictions = model_multi.predict(X_pred)  # shape: (num_samples, num_targets)
+
         pred_df = weather_df[['Day']].copy()
         for i, col in enumerate(TARGET_COLUMNS):
             pred_df[col] = predictions[:, i]
+
         agg_df = pred_df.groupby('Day').mean().reset_index()
-        
-        # Rename columns to remove spaces
         agg_df.rename(columns=lambda c: c.replace(" ", "_"), inplace=True)
 
-        # Build a dictionary of forecasts per day (each day is a dict with all targets)
+        # Build a dictionary: day_x => { "Ontario Demand": X, "Toronto": Y, "Niagara": Z }
         results = {}
         for i, row in enumerate(agg_df.itertuples(), 1):
-            # row attributes: Day, Ontario_Demand, Toronto, Niagara
-            # We'll revert underscores -> spaces in final keys
             day_forecast = {}
             for col in TARGET_COLUMNS:
                 safe_col = col.replace(" ", "_")
                 day_forecast[col] = round(getattr(row, safe_col), 2)
             results[f"day_{i}"] = day_forecast
 
-        # Check if user requested a specific location
-        location = request.args.get("location", None)
-        if location is not None:
-            location = location.strip()
+        # If user requested a specific location, return only Ontario Demand + that location
+        location = request.args.get("location", "").strip()
+        if location:
             if location not in TARGET_COLUMNS:
-                return jsonify({
-                    "error": f"Location '{location}' not available. Choose from {TARGET_COLUMNS}."
-                })
-            # Return only Ontario Demand + the requested location for each day
+                return jsonify({"error": f"Location '{location}' not available. Choose from {TARGET_COLUMNS}."})
             filtered = {}
             for day, forecasts in results.items():
                 filtered[day] = {
@@ -108,10 +95,10 @@ def predict():
                     location: forecasts[location]
                 }
             return jsonify(filtered)
-        
-        # Otherwise, return all forecasts
-        return jsonify(results)
-    
+        else:
+            # Otherwise, return all columns
+            return jsonify(results)
+
     except Exception as e:
         logging.error(f"Prediction error: {e}")
         return jsonify({"error": str(e)})
