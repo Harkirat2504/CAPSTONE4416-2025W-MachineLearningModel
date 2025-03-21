@@ -76,6 +76,9 @@ def predict():
         for i, col in enumerate(TARGET_COLUMNS):
             pred_df[col] = predictions[:, i]
         agg_df = pred_df.groupby('Day').mean().reset_index()
+        
+        # Rename columns to remove spaces (so that getattr works)
+        agg_df.rename(columns=lambda c: c.replace(" ", "_"), inplace=True)
 
         # Build a dictionary of forecasts per day (each day is a dict with all targets)
         results = {}
