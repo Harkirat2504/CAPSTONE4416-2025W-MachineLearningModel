@@ -8,7 +8,7 @@ import joblib  # For loading the pre-trained model
 from waitress import serve  # For production server
 
 app = Flask(__name__)
-CORS(app, origins=["https://capstone2025w.netlify.app"])
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 logging.basicConfig(level=logging.DEBUG)
 
