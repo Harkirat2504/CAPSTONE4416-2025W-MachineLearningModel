@@ -18,7 +18,7 @@ TARGET_COLUMNS = [
     "Essa", "Bruce", "Southwest", "Niagara", "West"
 ]
 
-# Load the multioutput model for predictions
+# Load the multioutput model used for /predict
 try:
     model_multi = joblib.load("multioutput_model.pkl")
     logging.info("Multi-output model loaded successfully.")
@@ -26,6 +26,7 @@ except Exception as e:
     logging.error(f"Error loading model: {e}")
     model_multi = None
 
+# Function to load and preprocess weather data (used in /predict)
 def get_weather_data(month, start_day, api_key, mode):
     current_temp = 20.0
     sunrise = 6
@@ -36,7 +37,6 @@ def get_weather_data(month, start_day, api_key, mode):
     hourly_data = []
 
     if mode == 'hourly':
-        # Return 1 day of hourly data
         day = start_day
         for hour in range(1, 25):
             temp = avg_temp - 5 + 10 * (sunrise <= hour <= sunset)
@@ -48,7 +48,6 @@ def get_weather_data(month, start_day, api_key, mode):
                 'Daylight': 1 if sunrise <= hour <= sunset else 0
             })
     else:
-        # Default daily => 7 days
         num_days = 7
         for day_offset in range(num_days):
             day = start_day + day_offset
@@ -65,25 +64,23 @@ def get_weather_data(month, start_day, api_key, mode):
                 })
     return pd.DataFrame(hourly_data)
 
-# New function for generating synthetic wind speed data
-def generate_wind_data(start_date, end_date):
-    time_points = pd.date_range(start=start_date, end=end_date, freq='H')
-    n = len(time_points)
-    wind_speed = np.clip(np.random.normal(7, 2, n), 0, 30)
-    def wind_turbine_output(ws):
-        if ws < 3 or ws > 25:
-            return 0
-        elif ws >= 12:
-            return 2000
-        else:
-            return (2000 / (12 - 3)) * (ws - 3)
-    turbine_output = [wind_turbine_output(ws) for ws in wind_speed]
-    return pd.DataFrame({
-        'datetime': time_points,
-        'wind_speed_ms': wind_speed,
-        'turbine_kwh': turbine_output
-    })
+# New: full preprocessing function (used in turbine endpoint) that replicates training features
+def load_and_preprocess_hourly_weather(file_path, track_outliers=True):
+    """Load and preprocess weather data with optimized operations."""
+    print("Loading CSV data...")
+    weather = pd.read_csv(file_path, parse_dates=['DATE'], index_col='DATE')
+    print("Processing missing values...")
+    null_pct = weather.isna().mean()
+    valid_columns = weather.columns[null_pct < 0.05]
+    weather = weather[valid_columns]
+    weather.columns = weather.columns.str.lower()
+    string_cols = weather.select_dtypes(include=['object']).columns
+    for col in string_cols:
+        weather[col] = pd.to_numeric(weather[col], errors='coerce')
+    weather = weather.ffill()
+    return weather
 
+# Existing /predict endpoint remains unchanged
 @app.route('/predict', methods=['GET'])
 def predict():
     try:
@@ -94,7 +91,6 @@ def predict():
         if model_multi is None:
             return jsonify({"error": "Model not available"})
 
-        # Build weather data
         weather_df = get_weather_data(month, start_day, API_KEY, mode)
         X_pred = weather_df[['Month', 'Day', 'Hour', 'Temperature', 'Daylight']]
         predictions = model_multi.predict(X_pred)
@@ -140,13 +136,13 @@ def predict():
         logging.error(f"Prediction error: {e}")
         return jsonify({"error": str(e)})
 
+# Existing /windspeed endpoint remains unchanged
 @app.route('/windspeed', methods=['GET'])
 def windspeed():
     try:
         today = datetime.now()
         month = int(request.args.get("month", today.month))
         start_day = int(request.args.get("start_day", today.day))
-        # Produce a 24-hour forecast using synthetic wind data.
         start_date = datetime(2024, month, start_day)
         end_date = start_date + timedelta(hours=23)
         wind_df = generate_wind_data(start_date, end_date)
@@ -156,26 +152,29 @@ def windspeed():
         logging.error(f"Wind speed error: {e}")
         return jsonify({"error": str(e)})
 
-# New /turbine endpoint: outputs turbine predictions based on the hourly turbine model.
+# New /turbine endpoint
 @app.route('/turbine', methods=['GET'])
 def turbine():
     try:
-        # Load the turbine model (trained separately using your wind model trainer)
-        turbine_model = joblib.load("turbine_hourly_model.pkl")
+        # Load the turbine model (trained with the full feature set)
+        turbine_model = joblib.load("multioutput_hourly_model.pkl")
         
-        today = datetime.now()
-        month = int(request.args.get("month", today.month))
-        start_day = int(request.args.get("start_day", today.day))
-        # We'll use hourly mode to generate 24 hours of weather data.
-        weather_df = get_weather_data(month, start_day, API_KEY, mode="hourly")
-        X_pred = weather_df[['Month', 'Day', 'Hour', 'Temperature', 'Daylight']]
+        # Load full weather data using the same preprocessing as training.
+        weather_full = load_and_preprocess_hourly_weather("synthetic_weather_hourly_2015_2025.csv", track_outliers=True)
+        forecast_horizon = 168  # same as used during training
+        target_cols = [f'target_hour_{i}' for i in range(1, forecast_horizon + 1)]
+        # Define predictors as all columns not in target columns (as during training)
+        predictors = [col for col in weather_full.columns if col not in target_cols]
         
-        # Get predictions (the model is trained to predict 'awnd' values)
-        predictions = turbine_model.predict(X_pred)
-        # Use only the first forecast hour for each row (assumed to be the 1-hour ahead prediction)
+        # For a 24-hour forecast, select the last 24 rows from the full data
+        test_data = weather_full.tail(24)[predictors]
+        
+        # Predict using the turbine model
+        predictions = turbine_model.predict(test_data)
+        # Assume the first column corresponds to the "awnd" (wind speed) prediction.
         predicted_awnd = predictions[:, 0]
         
-        # Define turbine function locally
+        # Wind turbine output function
         def wind_turbine_output(ws):
             if ws < 3 or ws > 25:
                 return 0
