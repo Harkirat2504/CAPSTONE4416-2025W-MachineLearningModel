@@ -13,9 +13,12 @@ CORS(app, origins=["https://capstone2025w.netlify.app"])
 logging.basicConfig(level=logging.DEBUG)
 
 API_KEY = "b783407e6178f465fa400808887c3e7f"
-TARGET_COLUMNS = ["Ontario Demand", "Toronto", "Niagara"]
+# Use all valid zones:
+TARGET_COLUMNS = [
+    "Northwest", "Northeast", "Ottawa", "East", "Toronto",
+    "Essa", "Bruce", "Southwest", "Niagara", "West"
+]
 
-# Load pre-trained multi-output model
 try:
     model_multi = joblib.load("multioutput_model.pkl")
     logging.info("Multi-output model loaded successfully.")
@@ -31,7 +34,6 @@ def get_weather_data(month, start_day, api_key, mode, lat=43.7, lon=-79.42):
     avg_temp = current_temp + temp_adjust.get(month, 0)
     days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
     hourly_data = []
-    
     for day_offset in range(7):
         day = start_day + day_offset
         if day > days_in_month:
@@ -70,11 +72,9 @@ def predict():
         pred_df = weather_df[['Day']].copy()
         for i, col in enumerate(TARGET_COLUMNS):
             pred_df[col] = predictions[:, i]
-
         agg_df = pred_df.groupby('Day').mean().reset_index()
         agg_df.rename(columns=lambda c: c.replace(" ", "_"), inplace=True)
 
-        # Build a dictionary: day_x => { "Ontario Demand": X, "Toronto": Y, "Niagara": Z }
         results = {}
         for i, row in enumerate(agg_df.itertuples(), 1):
             day_forecast = {}
@@ -83,7 +83,7 @@ def predict():
                 day_forecast[col] = round(getattr(row, safe_col), 2)
             results[f"day_{i}"] = day_forecast
 
-        # If user requested a specific location, return only Ontario Demand + that location
+        # If a specific location is requested, return only Ontario Demand and that location
         location = request.args.get("location", "").strip()
         if location:
             if location not in TARGET_COLUMNS:
@@ -96,7 +96,6 @@ def predict():
                 }
             return jsonify(filtered)
         else:
-            # Otherwise, return all columns
             return jsonify(results)
 
     except Exception as e:
