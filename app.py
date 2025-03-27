@@ -2,7 +2,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import joblib
 from waitress import serve
@@ -62,8 +62,27 @@ def get_weather_data(month, start_day, api_key, mode):
                     'Temperature': temp,
                     'Daylight': 1 if sunrise <= hour <= sunset else 0
                 })
-
     return pd.DataFrame(hourly_data)
+
+# New function for generating synthetic wind speed data
+def generate_wind_data(start_date, end_date):
+    time_points = pd.date_range(start=start_date, end=end_date, freq='H')
+    n = len(time_points)
+    # Generate wind speeds using a normal distribution and clip values to a realistic range
+    wind_speed = np.clip(np.random.normal(7, 2, n), 0, 30)
+    def wind_turbine_output(ws):
+        if ws < 3 or ws > 25:
+            return 0
+        elif ws >= 12:
+            return 2000
+        else:
+            return (2000 / (12 - 3)) * (ws - 3)
+    turbine_output = [wind_turbine_output(ws) for ws in wind_speed]
+    return pd.DataFrame({
+        'datetime': time_points,
+        'wind_speed_ms': wind_speed,
+        'turbine_kwh': turbine_output
+    })
 
 @app.route('/predict', methods=['GET'])
 def predict():
@@ -78,46 +97,33 @@ def predict():
         # Build weather data
         weather_df = get_weather_data(month, start_day, API_KEY, mode)
         X_pred = weather_df[['Month', 'Day', 'Hour', 'Temperature', 'Daylight']]
-
-        # Predict -> first column is OntarioDemand, then zones
         predictions = model_multi.predict(X_pred)
 
         results = {}
         if mode == 'hourly':
-            # 24 hours
             pred_df = weather_df[['Hour']].copy()
             pred_df["OntarioDemand"] = predictions[:, 0]
             for i, col in enumerate(TARGET_COLUMNS):
                 pred_df[col] = predictions[:, i+1]
-
-            # Build results keyed by hour
             for row in pred_df.itertuples():
                 hour_key = str(row.Hour)
                 hour_forecast = {"Ontario Demand": round(row.OntarioDemand, 2)}
                 for col in TARGET_COLUMNS:
                     hour_forecast[col] = round(getattr(row, col), 2)
                 results[hour_key] = hour_forecast
-
         else:
-            # daily => group by day
             pred_df = weather_df[['Day']].copy()
             pred_df["OntarioDemand"] = predictions[:, 0]
             for i, col in enumerate(TARGET_COLUMNS):
                 pred_df[col] = predictions[:, i+1]
-
             agg_df = pred_df.groupby('Day').mean().reset_index()
-
-            # Build results keyed by day_i
             for idx, row in agg_df.iterrows():
                 day_key = f"day_{idx+1}"
-                day_forecast = {}
-                # Return it as "Ontario Demand" in JSON
-                day_forecast["Ontario Demand"] = round(row["OntarioDemand"], 2)
+                day_forecast = {"Ontario Demand": round(row["OntarioDemand"], 2)}
                 for col in TARGET_COLUMNS:
                     day_forecast[col] = round(row[col], 2)
                 results[day_key] = day_forecast
 
-        # If user specified a location param, filter out everything else
         location = request.args.get("location", "").strip()
         if location:
             if location not in TARGET_COLUMNS:
@@ -129,13 +135,30 @@ def predict():
                     location: forecasts[location]
                 }
             return jsonify(filtered)
-
         return jsonify(results)
-
     except Exception as e:
         logging.error(f"Prediction error: {e}")
         return jsonify({"error": str(e)})
 
+# New endpoint for wind speed forecast (24-hour forecast)
+@app.route('/windspeed', methods=['GET'])
+def windspeed():
+    try:
+        today = datetime.now()
+        month = int(request.args.get("month", today.month))
+        start_day = int(request.args.get("start_day", today.day))
+        # For wind speed, produce a 24-hour forecast using synthetic data
+        start_date = datetime(2024, month, start_day)
+        end_date = start_date + timedelta(hours=23)
+        wind_df = generate_wind_data(start_date, end_date)
+        # Convert datetime to string if needed for JSON compatibility
+        wind_df['datetime'] = wind_df['datetime'].astype(str)
+        return jsonify(wind_df.to_dict(orient='records'))
+    except Exception as e:
+        logging.error(f"Wind speed error: {e}")
+        return jsonify({"error": str(e)})
+
 if __name__ == '__main__':
-    logging.info("Starting multi-output Flask API Server...")
-    serve(app, host="0.0.0.0", port=5000)
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    serve(app, host="0.0.0.0", port=port)
