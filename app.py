@@ -221,12 +221,12 @@ def load_and_preprocess_hourly_weather(file_path):
 def turbine():
     """
     Returns 168 hours (7 days) of predicted wind speeds from the
-    multioutput_hourly_model.pkl, then converts each hour's wind speed
+    turbine_hourly_model.pkl, then converts each hour's wind speed
     to a turbine output. The response includes both hourly data and daily sums.
     """
     try:
         # Load your 7-day turbine model
-        turbine_model = joblib.load("multioutput_hourly_model.pkl")
+        turbine_model = joblib.load("turbine_hourly_model.pkl")
     except Exception as e:
         logging.error(f"Error loading turbine model: {e}")
         return jsonify({"error": "Turbine model not available"})
