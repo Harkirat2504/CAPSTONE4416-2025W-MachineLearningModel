@@ -160,7 +160,8 @@ def turbine():
         turbine_model = joblib.load("turbine_hourly_model.pkl")
         
         # Load full weather data using the same preprocessing as training.
-        weather_full = load_and_preprocess_hourly_weather("synthetic_weather_hourly_2015_2025.csv", track_outliers=True)
+        # Add fillna(0) to ensure no NaNs remain.
+        weather_full = load_and_preprocess_hourly_weather("synthetic_weather_hourly_2015_2025.csv", track_outliers=True).fillna(0)
         forecast_horizon = 168  # same as used during training
         target_cols = [f'target_hour_{i}' for i in range(1, forecast_horizon + 1)]
         # Define predictors as all columns not in target columns (as during training)
@@ -193,6 +194,7 @@ def turbine():
     except Exception as e:
         logging.error(f"Turbine endpoint error: {e}")
         return jsonify({"error": str(e)})
+
 
 if __name__ == '__main__':
     import os
