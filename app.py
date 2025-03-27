@@ -80,6 +80,25 @@ def load_and_preprocess_hourly_weather(file_path, track_outliers=True):
     weather = weather.ffill()
     return weather
 
+# New function for generating synthetic wind speed data
+def generate_wind_data(start_date, end_date):
+    time_points = pd.date_range(start=start_date, end=end_date, freq='H')
+    n = len(time_points)
+    # Generate wind speeds using a normal distribution and clip values to a realistic range
+    wind_speed = np.clip(np.random.normal(7, 2, n), 0, 30)
+    def wind_turbine_output(ws):
+        if ws < 3 or ws > 25:
+            return 0
+        elif ws >= 12:
+            return 2000
+        else:
+            return (2000 / (12 - 3)) * (ws - 3)
+    turbine_output = [wind_turbine_output(ws) for ws in wind_speed]
+    return pd.DataFrame({
+        'datetime': time_points,
+        'wind_speed_ms': wind_speed,
+        'turbine_kwh': turbine_output
+    })
 # Existing /predict endpoint remains unchanged
 @app.route('/predict', methods=['GET'])
 def predict():
@@ -143,9 +162,11 @@ def windspeed():
         today = datetime.now()
         month = int(request.args.get("month", today.month))
         start_day = int(request.args.get("start_day", today.day))
+        # For wind speed, produce a 24-hour forecast using synthetic data
         start_date = datetime(2024, month, start_day)
         end_date = start_date + timedelta(hours=23)
         wind_df = generate_wind_data(start_date, end_date)
+        # Convert datetime to string if needed for JSON compatibility
         wind_df['datetime'] = wind_df['datetime'].astype(str)
         return jsonify(wind_df.to_dict(orient='records'))
     except Exception as e:
