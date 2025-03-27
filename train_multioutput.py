@@ -7,17 +7,22 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 API_KEY = "b783407e6178f465fa400808887c3e7f"
-# Define the target columns for the multi-output model.
-TARGET_COLUMNS = ["Ontario Demand", "Toronto", "Niagara"]
+# Use all valid zones:
+TARGET_COLUMNS = [
+    "Northwest", "Northeast", "Ottawa", "East", "Toronto",
+    "Essa", "Bruce", "Southwest", "Niagara", "West"
+]
 
 def load_energy_data(file_path="PUB_DemandZonal_2024_v374.csv"):
     """
     Load and preprocess energy demand data.
-    Expects the CSV to have a 'Date' column, an 'Hour' column,
-    and columns for each target (e.g. "Ontario Demand", "Toronto", "Niagara").
+    Assumes the CSV file has a header row and that the columns are arranged as:
+      "Date", "Hour", "Ontario Demand", "Northwest", "Northeast", "Ottawa", "East", "Toronto", "Essa", "Bruce", "Southwest", "Niagara", "West"
     """
     try:
-        df = pd.read_csv(file_path, skiprows=3)
+        # Read the CSV with its header row (no need to skip rows)
+        df = pd.read_csv(file_path)
+        print("Columns in CSV:", df.columns.tolist())
         df['Date'] = pd.to_datetime(df['Date'])
         df['Month'] = df['Date'].dt.month
         df['Day'] = df['Date'].dt.day
@@ -31,26 +36,26 @@ def train_multioutput_model():
     if df is None:
         raise Exception("Energy data could not be loaded.")
     
-    # Prepare feature set: assume the CSV has an "Hour" column.
+    # Prepare feature set using the known columns
     X_train = df[['Month', 'Day', 'Hour']].copy()
     
-    # Create a Temperature feature using a simple month-based mapping and random noise.
+    # Create Temperature feature using a simple month-based mapping plus random noise
     temp_map = {1: -5, 2: -3, 3: 0, 4: 5, 5: 10, 6: 15, 7: 20, 8: 18, 9: 12, 10: 6, 11: 0, 12: -4}
     np.random.seed(42)
     X_train['Temperature'] = X_train['Month'].map(temp_map) + np.random.normal(0, 2, size=len(X_train))
     
-    # Create a Daylight indicator based on the hour (1 if between 7 and 19, else 0).
+    # Create a Daylight indicator: 1 if hour is between 7 and 19, else 0
     X_train['Daylight'] = X_train['Hour'].apply(lambda h: 1 if 7 <= h <= 19 else 0)
     
-    # Check that all required target columns exist in the data.
+    # Verify that all required target columns exist in the data.
     for col in TARGET_COLUMNS:
         if col not in df.columns:
             raise Exception(f"Required column '{col}' not found in CSV.")
     
-    # Combine targets into a DataFrame (multi-output regression).
-    y_train = df[TARGET_COLUMNS]
+    # Our targets include "Ontario Demand" plus the valid zones.
+    y_train = df[["Ontario Demand"] + TARGET_COLUMNS]
     
-    # Train a RandomForestRegressor to predict all target columns at once.
+    # Train a multi-output RandomForestRegressor
     model = RandomForestRegressor(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
     return model
