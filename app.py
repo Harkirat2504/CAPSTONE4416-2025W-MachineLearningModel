@@ -173,30 +173,79 @@ def windspeed():
         logging.error(f"Wind speed error: {e}")
         return jsonify({"error": str(e)})
 
-# New /turbine endpoint
+# --------------------------------------------------------------------
+# 3) /turbine endpoint - returns 168 hours (7 days) of turbine outputs
+# --------------------------------------------------------------------
+def load_and_preprocess_hourly_weather(file_path):
+    """Replicates training pipeline's data load (like in your train_backtesting_model)."""
+    df = pd.read_csv(file_path, parse_dates=['DATE'], index_col='DATE')
+    # Remove columns with >5% missing
+    null_pct = df.isna().mean()
+    valid_columns = df.columns[null_pct < 0.05]
+    df = df[valid_columns]
+    # Lowercase columns
+    df.columns = df.columns.str.lower()
+    # Convert strings to numeric
+    string_cols = df.select_dtypes(include=['object']).columns
+    for col in string_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    # Forward fill
+    df = df.ffill()
+    # fillna(0) to avoid missing values
+    df = df.fillna(0)
+    return df
+
 @app.route('/turbine', methods=['GET'])
 def turbine():
+    """
+    Returns 168 hours (7 days) of predicted wind speeds from the
+    multioutput_hourly_model.pkl, then converts each hour's wind speed
+    to a turbine output. The response includes both hourly data and daily sums.
+    """
     try:
-        # Load the turbine model (trained with the full feature set)
-        turbine_model = joblib.load("turbine_hourly_model.pkl")
-        
-        # Load full weather data using the same preprocessing as training.
-        # Add fillna(0) to ensure no NaNs remain.
-        weather_full = load_and_preprocess_hourly_weather("synthetic_weather_hourly_2015_2025.csv", track_outliers=True).fillna(0)
-        forecast_horizon = 168  # same as used during training
-        target_cols = [f'target_hour_{i}' for i in range(1, forecast_horizon + 1)]
-        # Define predictors as all columns not in target columns (as during training)
-        predictors = [col for col in weather_full.columns if col not in target_cols]
-        
-        # For a 24-hour forecast, select the last 24 rows from the full data
-        test_data = weather_full.tail(24)[predictors]
-        
-        # Predict using the turbine model
-        predictions = turbine_model.predict(test_data)
-        # Assume the first column corresponds to the "awnd" (wind speed) prediction.
+        # Load your 7-day turbine model
+        turbine_model = joblib.load("multioutput_hourly_model.pkl")
+    except Exception as e:
+        logging.error(f"Error loading turbine model: {e}")
+        return jsonify({"error": "Turbine model not available"})
+
+    try:
+        # Parse query params for potential date-based selection
+        today = datetime.now()
+        month = int(request.args.get("month", today.month))
+        start_day = int(request.args.get("start_day", today.day))
+
+        # We'll generate a 7-day window from start_date
+        start_date = datetime(2024, month, start_day)
+        end_date = start_date + timedelta(days=7, hours=-1)  # 168 hours total
+
+        # 1) Load the full weather data used for training
+        weather_full = load_and_preprocess_hourly_weather("synthetic_weather_hourly_2015_2025.csv")
+
+        # 2) We'll select the subset of rows in the date range [start_date, end_date]
+        #    Assuming your 'DATE' index in training covers these times
+        subset = weather_full.loc[start_date:end_date].copy()
+        # If your training pipeline created target columns like target_hour_1..168,
+        # you must ensure we only pick the features (not target columns).
+        # We'll assume the model was trained with all original columns as features except targets.
+        forecast_horizon = 168
+        target_cols = [f"target_hour_{i}" for i in range(1, forecast_horizon+1)]
+        # Exclude any columns that were used as targets
+        predictors = [col for col in subset.columns if col not in target_cols]
+
+        # If the subset doesn't have enough rows (e.g. <168), we can handle that
+        if len(subset) < 168:
+            # We'll pad or just proceed with however many hours are available
+            logging.warning("Not enough data for 168 hours; partial forecast will be returned.")
+
+        # 3) Predict using the turbine model
+        X_test = subset[predictors]
+        predictions = turbine_model.predict(X_test)
+        # The first column is assumed to be the predicted wind speed (awnd).
+        # If your model has multiple targets, we assume index 0 is wind speed.
         predicted_awnd = predictions[:, 0]
-        
-        # Wind turbine output function
+
+        # 4) Convert predicted wind speeds to turbine outputs
         def wind_turbine_output(ws):
             if ws < 3 or ws > 25:
                 return 0
@@ -204,14 +253,32 @@ def turbine():
                 return 2000
             else:
                 return (2000 / (12 - 3)) * (ws - 3)
-        
-        turbine_outputs = [wind_turbine_output(ws) for ws in predicted_awnd]
-        
-        # Build a dictionary keyed by hour (1 to 24)
-        results = {}
-        for i, output in enumerate(turbine_outputs, start=1):
-            results[str(i)] = round(output, 2)
-        return jsonify(results)
+
+        hourly_outputs = [wind_turbine_output(ws) for ws in predicted_awnd]
+
+        # Build hourly results
+        # We'll map each hour to the output: "hour_0" -> output, etc.
+        hourly_dict = {}
+        for i, val in enumerate(hourly_outputs):
+            hour_key = f"hour_{i}"
+            hourly_dict[hour_key] = round(val, 2)
+
+        # Also compute daily sums
+        # We expect up to 168 hours => 7 days of 24 hours each
+        daily_sums = {}
+        for day_idx in range(7):
+            start_idx = day_idx * 24
+            end_idx = start_idx + 24
+            slice_hours = hourly_outputs[start_idx:end_idx]
+            day_sum = sum(slice_hours)
+            daily_sums[f"day_{day_idx+1}"] = round(day_sum, 2)
+
+        return jsonify({
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "hourly": hourly_dict,
+            "daily": daily_sums
+        })
     except Exception as e:
         logging.error(f"Turbine endpoint error: {e}")
         return jsonify({"error": str(e)})
