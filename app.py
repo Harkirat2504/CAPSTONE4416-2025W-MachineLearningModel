@@ -99,6 +99,28 @@ def generate_wind_data(start_date, end_date):
         'wind_speed_ms': wind_speed,
         'turbine_kwh': turbine_output
     })
+
+
+# New function for generating synthetic wind speed data
+def generate_wind_data(start_date, end_date):
+    time_points = pd.date_range(start=start_date, end=end_date, freq='H')
+    n = len(time_points)
+    # Generate wind speeds using a normal distribution and clip values to a realistic range
+    wind_speed = np.clip(np.random.normal(7, 2, n), 0, 30)
+    def wind_turbine_output(ws):
+        if ws < 3 or ws > 25:
+            return 0
+        elif ws >= 12:
+            return 2000
+        else:
+            return (2000 / (12 - 3)) * (ws - 3)
+    turbine_output = [wind_turbine_output(ws) for ws in wind_speed]
+    return pd.DataFrame({
+        'datetime': time_points,
+        'wind_speed_ms': wind_speed,
+        'turbine_kwh': turbine_output
+    })
+
 # Existing /predict endpoint remains unchanged
 @app.route('/predict', methods=['GET'])
 def predict():
