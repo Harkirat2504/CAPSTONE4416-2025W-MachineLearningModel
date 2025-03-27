@@ -157,7 +157,7 @@ def windspeed():
 def turbine():
     try:
         # Load the turbine model (trained with the full feature set)
-        turbine_model = joblib.load("multioutput_hourly_model.pkl")
+        turbine_model = joblib.load("turbine_hourly_model.pkl")
         
         # Load full weather data using the same preprocessing as training.
         weather_full = load_and_preprocess_hourly_weather("synthetic_weather_hourly_2015_2025.csv", track_outliers=True)
